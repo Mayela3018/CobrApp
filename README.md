@@ -262,7 +262,7 @@ Este proyecto es parte del curso **[Nombre del curso]** del ciclo **2026-I**,  e
 
 <div align="center">
 
-### 🇵🇪 Hecho con 💜 en Lima, Perú
+### Hecho con 💜 en Lima, Perú
 
 *Proyecto académico - Uso educativo*
 
