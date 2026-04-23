@@ -12,6 +12,8 @@ services:
       - N8N_BASIC_AUTH_PASSWORD=admin123
       - GENERIC_TIMEZONE=America/Lima
       - TZ=America/Lima
+      - WEBHOOK_URL=https://embattled-mousy-donated.ngrok-free.dev/
+      - N8N_EDITOR_BASE_URL=https://embattled-mousy-donated.ngrok-free.dev/
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
