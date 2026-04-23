@@ -27,6 +27,7 @@ pagos_del_dia = []
 def extraer_datos_de_imagen(img):
     """
     Recibe una imagen (array de numpy) y devuelve los datos del pago.
+    Soporta capturas de Yape y Plin.
     """
     resultados = reader.readtext(img, detail=1, paragraph=False)
 
@@ -37,23 +38,39 @@ def extraer_datos_de_imagen(img):
 
     texto_lower = texto_completo.lower()
 
-    # === TIPO ===
-    if 'yape' in texto_lower or 'yapeaste' in texto_lower or 'yapearon' in texto_lower:
-        tipo = 'Yape'
-    elif 'plin' in texto_lower or 'plineaste' in texto_lower:
+    # === TIPO (mejorado para Plin) ===
+    # Estrategia: buscar indicadores fuertes primero
+    # Plin usa "pago realizado" como frase característica
+    # Yape usa "yapeaste" o "te yapearon"
+    es_plin = (
+        'pago realizado' in texto_lower
+        or ('plin' in texto_lower and 'yapeaste' not in texto_lower and 'yapearon' not in texto_lower)
+    )
+    es_yape = (
+        'yapeaste' in texto_lower
+        or 'yapearon' in texto_lower
+    )
+
+    if es_plin:
         tipo = 'Plin'
+    elif es_yape:
+        tipo = 'Yape'
     else:
-        tipo = 'Desconocido'
+        # Fallback: si solo dice "yape" o "plin" sin contexto claro
+        if 'plin' in texto_lower:
+            tipo = 'Plin'
+        elif 'yape' in texto_lower:
+            tipo = 'Yape'
+        else:
+            tipo = 'Desconocido'
 
     # === MONTO ===
     monto = None
 
-    # Intento 1: patrón "S/XX" o "S/ XX" pegado o con espacio
     match = re.search(r'[Ss]\s*/\s*\.?\s*(\d+(?:[.,]\d{1,2})?)', texto_completo)
     if match:
         monto = match.group(1).replace(',', '.')
 
-    # Intento 2: item que empiece con S/ y tenga el número pegado
     if not monto:
         for bbox, texto, confianza in resultados:
             match_item = re.match(r'^[Ss]\s*/\s*(\d+(?:[.,]\d{1,2})?)\s*$', texto.strip())
@@ -61,7 +78,6 @@ def extraer_datos_de_imagen(img):
                 monto = match_item.group(1).replace(',', '.')
                 break
 
-    # Intento 3: buscar variaciones de "S/" mal leídas y tomar el siguiente número
     if not monto:
         items = [r[1] for r in resultados]
         patrones_s = [
@@ -80,7 +96,6 @@ def extraer_datos_de_imagen(img):
                         monto = match_num.group(1).replace(',', '.')
                         break
 
-    # Intento 4: número "con pinta de monto" entre los primeros items
     if not monto:
         primeros_items = resultados[:6]
         for bbox, texto, confianza in primeros_items:
@@ -90,13 +105,28 @@ def extraer_datos_de_imagen(img):
                 break
 
     # === NÚMERO DE OPERACIÓN ===
-    op = re.search(r'operaci[oó]n[:\s]*(\d+)', texto_completo, re.IGNORECASE)
+    # Plin usa "Cód. operación", Yape usa "Nro. de operación"
+    op = re.search(
+        r'(?:operaci[oó]n|c[oó]d\.?\s*operaci[oó]n)[:\s]*(\d+)',
+        texto_completo,
+        re.IGNORECASE
+    )
     if not op:
         op = re.search(r'\b(\d{7,10})\b', texto_completo)
     numero_operacion = op.group(1) if op else None
 
-    # === FECHA ===
+    # === FECHA (mejorado para Plin) ===
+    # Intento 1: "20 dic. 2025" (formato Yape)
     fecha_match = re.search(r'(\d{1,2}\s+\w+\.?\s+\d{4})', texto_completo)
+
+    # Intento 2: "21 Abr" (formato Plin sin año)
+    if not fecha_match:
+        fecha_match = re.search(
+            r'(\d{1,2}\s+(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\.?)',
+            texto_completo,
+            re.IGNORECASE
+        )
+
     fecha = fecha_match.group(1) if fecha_match else None
 
     # === HORA ===
@@ -107,12 +137,30 @@ def extraer_datos_de_imagen(img):
     )
     hora = hora_match.group(1) if hora_match else None
 
-    # === NOMBRE ===
+    # === NOMBRE (mejorado para Plin) ===
+    # Estrategia 1: buscar item con asterisco (formato Yape)
     nombre = None
     for bbox, texto, confianza in resultados:
         if '*' in texto and any(c.isalpha() for c in texto):
             nombre = texto.strip()
             break
+
+    # Estrategia 2: si no hay asterisco, buscar el nombre después del saludo (Plin)
+    if not nombre:
+        items = [r[1] for r in resultados]
+        for i, item in enumerate(items):
+            if re.search(r'pago\s*realizado|yapeaste|yapearon', item, re.IGNORECASE):
+                # El siguiente item con letras (no monto) probablemente es el nombre
+                for j in range(i + 1, min(i + 5, len(items))):
+                    candidato = items[j].strip()
+                    if re.match(r'^[Ss]', candidato) or re.match(r'^\d', candidato):
+                        continue
+                    palabras = candidato.split()
+                    if len(palabras) >= 2 and all(any(c.isalpha() for c in p) for p in palabras[:2]):
+                        nombre = candidato
+                        break
+                if nombre:
+                    break
 
     # === ARMAR RESPUESTA ===
     # Considerar válido solo si tiene monto, operación y tipo reconocido
