@@ -34,3 +34,9 @@ google-credentials.json
 # Archivos temporales
 *.tmp
 *.bak
+
+# Credenciales sensibles
+credenciales/
+*.json
+!docker-compose.yml
+!package.json
