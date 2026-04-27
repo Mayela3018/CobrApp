@@ -291,16 +291,29 @@ async def health():
 async def procesar_imagen(file: UploadFile = File(...)):
     """
     Procesa una captura de pago Yape/Plin y devuelve los datos extraídos.
+    Acepta cualquier formato de imagen soportado por OpenCV:
+    PNG, JPEG, JPG, BMP, WebP, TIFF, etc.
     """
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
+    # Validar content_type SOLO si viene presente.
+    # n8n manda imágenes como binario puro sin content_type, así que
+    # solo rechazamos si HAY content_type y NO es de tipo imagen.
+    # La validación final del contenido la hace cv2.imdecode más abajo.
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo debe ser una imagen"
+        )
 
     contenido = await file.read()
     nparr = np.frombuffer(contenido, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+    # Si OpenCV no pudo decodificar el archivo, no es una imagen válida
     if img is None:
-        raise HTTPException(status_code=400, detail="No se pudo leer la imagen")
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo decodificar la imagen. Formatos soportados: PNG, JPEG, JPG, BMP, WebP, TIFF."
+        )
 
     datos = extraer_datos_de_imagen(img)
 
