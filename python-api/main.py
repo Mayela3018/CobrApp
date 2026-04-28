@@ -34,8 +34,11 @@ PALABRAS_PUBLICIDAD = [
 # Patrón flexible para "S/" mal leído por OCR
 PATRON_S_FLEXIBLE = r'[Ss8B]\s*[/Il1|]'
 
-# Patrón de hora multi-formato
-HORA_PATRON = r'(\d{1,2}[:\.]\d{2}\s*[ap]\s*\.?\s*m\s*\.?)'
+# Patrón de hora multi-formato MEJORADO (Bug A)
+# Acepta variaciones de espacios, puntos y comas entre a/p y m
+# Casos cubiertos: "09:23 p.m."  "04:12 p.m."  "09:06 a. m."  "01:25 p. m."
+#                  "09.23 p.m."  "9:23 PM"     "9:23pm"        "9.23 P. M."
+HORA_PATRON = r'(\d{1,2}[:\.]\d{2}\s*[ap][\s\.\,]*m[\s\.\,]*)'
 
 
 def extraer_datos_de_imagen(img):
@@ -222,7 +225,8 @@ def extraer_datos_de_imagen(img):
     # ======================================================
     nombre = None
 
-    # Estrategia 1: item con asterisco (Yape)
+    # Estrategia 1: item con asterisco (Yape - personas)
+    # Ejemplo: "Diana Rey*"
     for bbox, texto, confianza in resultados_validos:
         if '*' in texto and any(c.isalpha() for c in texto):
             if re.search(r'[A-Za-záéíóúñÑ]{2,}', texto):
@@ -230,6 +234,7 @@ def extraer_datos_de_imagen(img):
                 break
 
     # Estrategia 2: nombre después del saludo (Plin)
+    # Ejemplo: "¡Pago realizado!" → "Haide Santana Y"
     if not nombre:
         items = [r[1] for r in resultados_validos]
         for i, item in enumerate(items):
@@ -244,6 +249,29 @@ def extraer_datos_de_imagen(img):
                         break
                 if nombre:
                     break
+
+    # Estrategia 3: nombre debajo del monto (Yape - empresas sin asterisco)
+    # Ejemplo: "S/ 50" → "Shalom Empresarial" → "27 abr. 2026"
+    # Bug B reportado por MAY: empresas no usan asterisco, fallback necesario
+    if not nombre:
+        items = [r[1] for r in resultados_validos]
+        for i, item in enumerate(items):
+            # Si el item tiene patrón de monto "S/ XX" o variaciones
+            if re.match(rf'^{PATRON_S_FLEXIBLE}\s*\.?\s*\d+', item.strip()):
+                # El siguiente item es probablemente el nombre
+                if i + 1 < len(items):
+                    candidato = items[i + 1].strip()
+                    # Validar que parezca nombre:
+                    # - Más de 3 caracteres
+                    # - No empieza con número (no es fecha/operación)
+                    # - No contiene año (4 dígitos seguidos)
+                    # - Tiene al menos 2 letras seguidas
+                    if (len(candidato) > 3
+                        and not re.match(r'^\d', candidato)
+                        and not re.search(r'\d{4}', candidato)
+                        and re.search(r'[A-Za-záéíóúñÑ]{2,}', candidato)):
+                        nombre = candidato
+                        break
 
     # ======================================================
     # ARMAR RESPUESTA
